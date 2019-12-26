@@ -4,7 +4,15 @@
 
 int main(void)
 {
+    // Memory and stack
     uint8_t mem[4096];
+    uint16_t stack[16];
+
+    // Program counter and stack pointer
+    uint16_t PC = 0x200;
+    uint8_t SP = 0;
+
+    // Data registers
     uint8_t V0;
     uint8_t V1;
     uint8_t V2;
@@ -21,14 +29,24 @@ int main(void)
     uint8_t VD;
     uint8_t VE;
     uint8_t VF;
+
+    // Address register
     uint16_t I;
 
-    uint16_t PC = 0x200;
-    uint8_t SP;
+    // Delay timer and sound timer
+    uint8_t dt;
+    uint8_t st;
+
+    // Fonts
+    // ...
 
     for (;;)
     {
 
+        switch (opcode)
+        {
+            
+        }
     }
 
     return EXIT_SUCCESS;
