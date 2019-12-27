@@ -5,18 +5,35 @@
 #include <SDL2/SDL.h>
 
 #define SCALE 10
+#define WIDTH 64
+#define HEIGHT 32
 
 void todo(void)
 {
     return;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     // Memory and stack
     uint8_t mem[4096];
+    for (size_t i = 0; i < 4096; i++)
+        mem[i] = 0;
+
+    // Load ROM file into memory
+    if (argc > 1)
+    {
+        FILE *rom = fopen(argv[1], "rb");
+        fseek(rom, 0, SEEK_END);
+        long fsize = ftell(rom);
+        fseek(rom, 0, SEEK_SET);
+        fread(mem + 0x200, sizeof(uint8_t), fsize, rom);
+    }
+
     uint16_t stack[16];
     bool display[2048];
+    for (size_t i = 0; i < 2048; i++)
+        display[i] = false;
 
     // Program counter and stack pointer
     uint16_t pc = 0x200;
@@ -24,13 +41,15 @@ int main(void)
 
     // Data registers
     uint8_t v[16];
+    for (size_t i = 0; i < 16; i++)
+        v[i] = 0;
 
     // Address register
-    uint16_t I;
+    uint16_t I = 0;
 
     // Delay timer and sound timer
-    uint8_t dt;
-    uint8_t st;
+    uint8_t dt = 0;
+    uint8_t st = 0;
 
     // Storing font data (one line per char, 0 -> F) into reserved memory space (0x000 -> 0x04F included)
     uint8_t *font_byte = mem;
@@ -50,31 +69,41 @@ int main(void)
     *font_byte++ = 0xE0; *font_byte++ = 0x90; *font_byte++ = 0x90; *font_byte++ = 0x90; *font_byte++ = 0xE0;
     *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0xF0;
     *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte = 0x80;
-  
+
+    // MEM DUMP
+    for (size_t i = 0; i < 4096; i++)
+        printf("%03X : %02X\n", i, mem[i]);
+
+    // Initialize SDL
     SDL_Window *win;
     SDL_Renderer *ren;
 
-    int width = 64 * SCALE;
-    int height = 32 * SCALE;
+    int width = WIDTH * SCALE;
+    int height = HEIGHT * SCALE;
 
     SDL_Init(SDL_INIT_VIDEO);
     SDL_CreateWindowAndRenderer(width, height, 0, &win, &ren);
     SDL_RenderSetScale(ren, SCALE, SCALE);
-    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     
-    for (int i = 0; i < width; i++)
+    // Clear screen
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    for (int i = 0; i < height; i++)
     {
-        for (int j = 0; j < height; j++)
+        for (int j = 0; j < width; j++)
         {
             SDL_RenderDrawPoint(ren, i, j);
         }
     }
     SDL_RenderPresent(ren);
-
-    SDL_Event e;
     
+    SDL_Event e;
     while (true)
     {
+        if (pc > 4095)
+        {
+            printf("Reached end of memory\n");
+            break;
+        }
         if (SDL_PollEvent(&e) && e.type == SDL_QUIT)
             break;
         
@@ -249,7 +278,7 @@ int main(void)
                 switch (opcode & 0x00FF)
                 {
                     case 0x07:
-                        todo();
+                        v[opcode & 0x0F00] = dt;
                         break;
                     
                     case 0x0A:
@@ -257,19 +286,19 @@ int main(void)
                         break;
 
                     case 0x15:
-                        todo();
+                        dt = v[opcode & 0x0F00];
                         break;
                     
                     case 0x18:
-                        todo();
+                        st = v[opcode & 0x0F00];
                         break;
                     
                     case 0x1E:
-                        todo();
+                        I += v[opcode & 0x0F00];
                         break;
 
                     case 0x29:
-                        todo();
+                        I = v[opcode & 0x0F00] * 5;
                         break;
 
                     case 0x33:
@@ -277,11 +306,17 @@ int main(void)
                         break;
 
                     case 0x55:
-                        todo();
+                        for (size_t i = 0; i <= (opcode & 0x0F00); i++)
+                        {
+                            mem[I++] = v[i];
+                        }
                         break;
 
                     case 0x65:
-                        todo();
+                        for (size_t i = 0; i <= (opcode & 0x0F00); i++)
+                        {
+                            v[i] = mem[I++];
+                        }
                         break;
 
                     default:
@@ -293,13 +328,13 @@ int main(void)
                 printf("Unrecognized opcode %04X. Skipping.\n", opcode);
                 break;
         }
-
-        // Redraw what's on screen
-        for (int i = 0; i < height; i++)
+        // Redraw display
+        for (int i = 0; i < HEIGHT; i++)
         {
-            for (int j = 0; j < width; j++)
+            for (int j = 0; j < WIDTH; j++)
             {
-                if (display[i * height + j])
+                // printf("I = %i, J = %i\n", i, j);
+                if (display[i * height + j] == true)
                     SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
                 else
                     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
