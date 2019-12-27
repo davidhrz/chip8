@@ -8,8 +8,9 @@
 #define WIDTH 64
 #define HEIGHT 32
 
-void todo(void)
+void todo(uint8_t opcode)
 {
+    printf("Opcode %04X not implemented.\n", opcode);
     return;
 }
 
@@ -113,18 +114,19 @@ int main(int argc, char **argv)
         // Test the first hexadecimal digit of the opcode
         switch (opcode & 0xF000)
         {
-            case 0x0:
+            case 0x0000:
                 switch (opcode)
                 {
                     // Clear the screen
                     case 0x00E0:
                         for (size_t i = 0; i < 2048; i++)
                             display[i] = false;
+                        pc += 2;
                         break;
                     
+                    // Return from subroutine
                     case 0x00EE:
-                        // TODO: Return from a subroutine
-                        todo();
+                        pc = stack[sp--];
                         break;
                     
                     default:
@@ -132,69 +134,81 @@ int main(int argc, char **argv)
                 }
                 break;
             
-            case 0x1:
+            // Jump to address
+            case 0x1000:
                 pc = opcode & 0x0FFF;
                 break;
             
-            case 0x2:
-                // Execute subroutine starting at address NNN
-                todo();
+            // Execute subroutine starting at address
+            case 0x2000:
+                stack[++sp] = pc;
+                pc = opcode & 0x0FFF;
                 break;
             
-            case 0x3:
+            // Skip following instruction if VX == NN
+            case 0x3000:
                 if (v[opcode & 0x0F00] == (opcode & 0x00FF))
                     pc += 4;
                 else
                     pc += 2;
                 break;
 
-            case 0x4:
+            // Skip following instruction if VX != NN
+            case 0x4000:
                 if (v[opcode & 0x0F00] != (opcode & 0x00FF))
                     pc += 4;
                 else
                     pc += 2;
                 break;
             
-            case 0x5:
+            // Skip following instruction if VX == VY
+            case 0x5000:
                 if (v[opcode & 0x0F00] == v[opcode & 0x00F0])
                     pc += 4;
                 else
                     pc += 2;
                 break;
 
-            case 0x6:
+            // Store NN in VX
+            case 0x6000:
                 v[opcode & 0x0F00] = opcode & 0x00FF;
                 pc += 2;
                 break;
             
-            case 0x7:
+            // Add NN to VX
+            case 0x7000:
                 v[opcode & 0x0F00] += opcode & 0x00FF;
                 pc += 2;
                 break;
 
-            case 0x8:
+            case 0x8000:
                 switch (opcode & 0x000F)
                 {
+                    // Store VY in VX
                     case 0x0:
                         v[opcode & 0x0F00] = v[opcode & 0x00F0];
                         pc += 2;
                         break;
                     
+                    // Set VX to VX | VY
                     case 0x1:
                         v[opcode & 0x0F00] |= v[opcode & 0x00F0];
                         pc += 2;
                         break;
 
+                    // Set VX to VX && VY
                     case 0x2:
                         v[opcode & 0x0F00] &= v[opcode & 0x00F0];
                         pc += 2;
                         break;
 
+                    // Set VX to VX ^ VY
                     case 0x3:
                         v[opcode & 0x0F00] ^= v[opcode & 0x00F0];
                         pc += 2;
                         break;
 
+                    // Add VY to VX, set VF if carry occurs
                     case 0x4:
                         if ((uint64_t) (v[opcode & 0x0F00]) + (uint64_t) (v[opcode & 0x00F0]) > UINT8_MAX)
                             v[0xF] = 1;
@@ -207,23 +221,27 @@ int main(int argc, char **argv)
                     case 0x5:
                         //Subtract value of VY from VX
                         // Set VF to 0 if a borrow occurs, set to 1 otherwise
-                        todo();
+                        todo(opcode);
                         break;
                     
+                    // Set VX to (VY >> 1), set VF to LSB prior to the shift
                     case 0x6:
                         v[opcode & 0x0F00] = v[opcode & 0x00F0] >> 1;
                         v[0xF] = v[opcode & 0x00F0] & 0xF;
+                        pc += 2;
                         break;
                     
                     case 0x7:
                         // Set VX to the value of VY minus VX
                         // Set VF to 0 if a borrow occurs, set to 1 otherwise
-                        todo();
+                        todo(opcode);
                         break;
                     
+                    // Set VX to (VX << 1), set VF to MSB prior to the shift
                     case 0xE:
                         v[opcode & 0x0F00] = v[opcode & 0x00F0] << 1;
                         v[0xF] = v[opcode & 0x0F00] & 0xF;
+                        pc += 2;
                         break;
 
                     default:
@@ -231,78 +249,101 @@ int main(int argc, char **argv)
                 }
                 break;
             
-            case 0x9:
+            // Skip next instruction if VX != VY
+            case 0x9000:
                 if (v[opcode & 0x0F00] != v[opcode & 0x00F0])
                     pc += 4;
                 else
                     pc += 2;
                 break;
             
-            case 0xA:
+            // Store NNN in I
+            case 0xA000:
                 I = opcode & 0x0FFF;
                 pc += 2;
                 break;
-
-            case 0xB:
+            
+            // Jump to NNN + V0
+            case 0xB000:
                 pc = v[0] + (opcode & 0x0FFF);
                 break;
 
-            case 0xC:
+            // Set VX to random number
+            case 0xC000:
                 v[opcode & 0x0F00] = 23; // random !
                 break;
             
-            case 0xD:
+            case 0xD000:
                 // Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I. 
                 // Set VF to 01 if any set pixels are changed to unset, and 00 otherwise
-                todo();
+                // X = v[opcode & 0x0F00]
+                // Y = v[opcode & 0x00F0]
+                // N = v[opcode & 0x000F]
+                for (uint8_t i = 0; i < v[opcode & 0x000F]; i++)
+                {
+                    for (uint8_t j = 0; i < 8; j++)
+                    {
+                        display[i * HEIGHT + j] = display[i * HEIGHT + j] ^ mem[I + i];
+                    }
+                }
+                pc += 2;
                 break;
 
-            case 0xE:
+            case 0xE000:
                 switch (opcode & 0x00FF)
                 {
-                case 0x9E:
-                    //if (SDL_PollEvent(&e) && e.type == SDL_KEYDOWN && e.key.keysym.sym == )
-                    todo();
-                    break;
+                    case 0x9E:
+                        //if (SDL_PollEvent(&e) && e.type == SDL_KEYDOWN && e.key.keysym.sym == )
+                        todo(opcode);
+                        break;
 
-                case 0xA1:
-                    todo();
-                    break;
-                
-                default:
-                    break;
+                    case 0xA1:
+                        todo(opcode);
+                        break;
+                    
+                    default:
+                        break;
                 }
                 break;
             
-            case 0xF:
+            case 0xF000:
                 switch (opcode & 0x00FF)
                 {
                     case 0x07:
                         v[opcode & 0x0F00] = dt;
+                        pc += 2;
                         break;
                     
                     case 0x0A:
-                        todo();
+                        // Wait for a keypress and store result in VX
+                        todo(opcode);
                         break;
 
                     case 0x15:
                         dt = v[opcode & 0x0F00];
+                        pc += 2;
                         break;
                     
                     case 0x18:
                         st = v[opcode & 0x0F00];
+                        pc += 2;
                         break;
                     
                     case 0x1E:
                         I += v[opcode & 0x0F00];
+                        pc += 2;
                         break;
 
                     case 0x29:
                         I = v[opcode & 0x0F00] * 5;
+                        pc += 2;
                         break;
 
                     case 0x33:
-                        todo();
+                        mem[I] = v[(opcode & 0x0F00) >> 8] / 100;
+                        mem[I + 1] = (v[(opcode & 0x0F00) >> 8] / 10) % 10;
+                        mem[I + 2] = (v[(opcode & 0x0F00) >> 8] % 100) % 10;
+                        pc += 2;
                         break;
 
                     case 0x55:
@@ -310,6 +351,7 @@ int main(int argc, char **argv)
                         {
                             mem[I++] = v[i];
                         }
+                        pc += 2;
                         break;
 
                     case 0x65:
@@ -317,6 +359,7 @@ int main(int argc, char **argv)
                         {
                             v[i] = mem[I++];
                         }
+                        pc += 2;
                         break;
 
                     default:
