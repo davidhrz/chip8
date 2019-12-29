@@ -8,6 +8,11 @@
 #define WIDTH 64
 #define HEIGHT 32
 
+void draw_pixel_inarray(bool *display, size_t x, size_t y, bool state)
+{
+    *(display + (y * WIDTH + x)) = state;
+}
+
 void todo(uint8_t opcode)
 {
     printf("Opcode %04X not implemented.\n", opcode);
@@ -16,7 +21,7 @@ void todo(uint8_t opcode)
 
 int main(int argc, char **argv)
 {
-    // Memory and stack
+    // 4096 B memory
     uint8_t mem[4096];
     for (size_t i = 0; i < 4096; i++)
         mem[i] = 0;
@@ -25,13 +30,18 @@ int main(int argc, char **argv)
     if (argc > 1)
     {
         FILE *rom = fopen(argv[1], "rb");
+
+        // Read file size
         fseek(rom, 0, SEEK_END);
         long fsize = ftell(rom);
         fseek(rom, 0, SEEK_SET);
+
+        // Read file to memory starting at address 0x200
         fread(mem + 0x200, sizeof(uint8_t), fsize, rom);
     }
 
     uint16_t stack[16];
+    
     bool display[2048];
     for (size_t i = 0; i < 2048; i++)
         display[i] = false;
@@ -72,8 +82,8 @@ int main(int argc, char **argv)
     *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte = 0x80;
 
     // MEM DUMP
-    for (size_t i = 0; i < 4096; i++)
-        printf("%03X : %02X\n", i, mem[i]);
+    // for (size_t i = 0; i < 4096; i++)
+    //     printf("%03X : %02X\n", i, mem[i]);
 
     // Initialize SDL
     SDL_Window *win;
@@ -87,12 +97,12 @@ int main(int argc, char **argv)
     SDL_RenderSetScale(ren, SCALE, SCALE);
     
     // Clear screen
-    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(ren, 0, 255, 0, 255);
     for (int i = 0; i < height; i++)
     {
         for (int j = 0; j < width; j++)
         {
-            SDL_RenderDrawPoint(ren, i, j);
+            SDL_RenderDrawPoint(ren, j, i);
         }
     }
     SDL_RenderPresent(ren);
@@ -279,11 +289,11 @@ int main(int argc, char **argv)
                 // X = v[opcode & 0x0F00]
                 // Y = v[opcode & 0x00F0]
                 // N = v[opcode & 0x000F]
-                for (uint8_t i = 0; i < v[opcode & 0x000F]; i++)
+                for (uint8_t y = 0; y < v[opcode & 0x000F]; y++)
                 {
-                    for (uint8_t j = 0; i < 8; j++)
+                    for (uint8_t x = 0; x < 8; x++)
                     {
-                        display[i * HEIGHT + j] = display[i * HEIGHT + j] ^ mem[I + i];
+                        display[v[opcode & 0x00F0] * WIDTH + v[opcode & 0x0F00]] = display[v[opcode & 0x00F0] * WIDTH + v[opcode & 0x0F00]] ^ mem[I + y];
                     }
                 }
                 pc += 2;
@@ -377,11 +387,11 @@ int main(int argc, char **argv)
             for (int j = 0; j < WIDTH; j++)
             {
                 // printf("I = %i, J = %i\n", i, j);
-                if (display[i * height + j] == true)
+                if (display[i * WIDTH + j] == true)
                     SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
                 else
                     SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
-                SDL_RenderDrawPoint(ren, i, j);
+                SDL_RenderDrawPoint(ren, j, i);
             }
         }
         SDL_RenderPresent(ren);
