@@ -118,9 +118,15 @@ int main(int argc, char **argv)
     SDL_RenderPresent(ren);
     
     uint16_t prev_opcode = 0;
+    time_t stamp = time(NULL);
     SDL_Event e;
     while (true)
     {
+        time_t delta = time(NULL) - stamp;
+        dt -= delta;
+        st -= delta;
+        stamp = time(NULL);
+
         SDL_KeyboardEvent k;
         bool key_pressed = false;
         while (SDL_PollEvent(&e))
