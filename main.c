@@ -81,7 +81,7 @@ int main(int argc, char **argv)
     *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0;
     *font_byte++ = 0xF0; *font_byte++ = 0x10; *font_byte++ = 0x20; *font_byte++ = 0x40; *font_byte++ = 0x40;
     *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0;
-    *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0x90;
+    *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0; *font_byte++ = 0x10; *font_byte++ = 0xF0;
     *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0xF0; *font_byte++ = 0x90; *font_byte++ = 0x90;
     *font_byte++ = 0xE0; *font_byte++ = 0x90; *font_byte++ = 0xE0; *font_byte++ = 0x90; *font_byte++ = 0xE0;
     *font_byte++ = 0xF0; *font_byte++ = 0x80; *font_byte++ = 0x80; *font_byte++ = 0x80; *font_byte++ = 0xF0;
@@ -117,9 +117,12 @@ int main(int argc, char **argv)
     }
     SDL_RenderPresent(ren);
     
+    uint16_t prev_opcode = 0;
     SDL_Event e;
     while (true)
     {
+        SDL_KeyboardEvent k;
+        bool key_pressed = false;
         while (SDL_PollEvent(&e))
         {
             switch (e.type)
@@ -129,11 +132,16 @@ int main(int argc, char **argv)
                     break;
                 
                 case SDL_KEYDOWN:
-                    printf("Pressed: %s\n", SDL_GetKeyName(e.key.keysym.sym));
+                    k = e.key;
+                    key_pressed = true;
+                    printf("Pressed: %s\n", SDL_GetKeyName(k.keysym.sym));
                     break;
 
                 case SDL_KEYUP:
-                    printf("Released: %s\n", SDL_GetKeyName(e.key.keysym.sym));
+                    k = e.key;
+                    key_pressed = false;
+                    //printf("Released: %s\n", SDL_GetKeyName(k.keysym.sym));
+                    break;
 
                 default:
                     break;
@@ -142,7 +150,6 @@ int main(int argc, char **argv)
         if (quit)
             break;
         
-        uint16_t prev_opcode = 0;
         uint16_t opcode = (mem[pc] << 8) | mem[pc + 1];
         uint8_t x = (opcode & 0x0F00) >> 8;
         uint8_t y = (opcode & 0x00F0) >> 4;
@@ -152,6 +159,7 @@ int main(int argc, char **argv)
 
         if (opcode != prev_opcode)
             printf("OPCODE = %04X\n", opcode);
+        prev_opcode = opcode;
 
         // Test the first hexadecimal digit of the opcode
         switch (opcode & 0xF000)
@@ -252,7 +260,7 @@ int main(int argc, char **argv)
 
                     // Add VY to VX, set VF if carry occurs
                     case 0x4:
-                        if ((uint64_t) (v[opcode & 0x0F00]) + (uint64_t) (v[opcode & 0x00F0]) > UINT8_MAX)
+                        if ((uint64_t) (v[x]) + (uint64_t) (v[y]) > UINT8_MAX)
                             v[0xF] = 1;
                         else
                             v[0xF] = 0;
@@ -263,7 +271,12 @@ int main(int argc, char **argv)
                     case 0x5:
                         //Subtract value of VY from VX
                         // Set VF to 0 if a borrow occurs, set to 1 otherwise
-                        todo(opcode);
+                        if (v[y] > v[x])
+                            v[0xF] = 0;
+                        else
+                            v[0xF] = 1;
+                        v[x] -= v[y];
+                        pc += 2;
                         break;
                     
                     // Set VX to (VY >> 1), set VF to LSB prior to the shift
@@ -276,7 +289,12 @@ int main(int argc, char **argv)
                     case 0x7:
                         // Set VX to the value of VY minus VX
                         // Set VF to 0 if a borrow occurs, set to 1 otherwise
-                        todo(opcode);
+                        if (v[x] > v[y])
+                            v[0xF] = 0;
+                        else
+                            v[0xF] = 1;
+                        v[x] = v[y] - v[x];
+                        pc += 2;
                         break;
                     
                     // Set VX to (VY << 1), set VF to MSB prior to the shift
@@ -313,17 +331,24 @@ int main(int argc, char **argv)
             // Set VX to (random number & NN)
             case 0xC000:
                 v[x] = rand() & nn;
+                pc += 2;
                 break;
             
             case 0xD000:
                 // Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I. 
                 // Set VF to 01 if any set pixels are changed to unset, and 00 otherwise
-                for (uint8_t y_sprite = 0; y < n; y++)
+                v[0xF] = 0;
+                for (uint8_t yline = 0; yline < n; yline++)
                 {
-                    for (uint8_t x_sprite = 0; x < 8; x++)
+                    uint8_t line = mem[I + yline];
+                    for (uint8_t xline = 0; xline < 8; xline++)
                     {
-                        display[(v[y] + y_sprite) * WIDTH + v[x] + x_sprite] = 
-                        display[v[y] * WIDTH + v[x]] ^ mem[I + y];
+                        if ((line & (0x80 >> xline)) != 0)
+                        {
+                            if (display[(v[y] + yline) * WIDTH + v[x] + xline] == 1)
+                                v[0xF] = 1;                                 
+                            display[(v[y] + yline) * WIDTH + v[x] + xline] ^= 1;
+                        }
                     }
                 }
                 pc += 2;
@@ -335,14 +360,19 @@ int main(int argc, char **argv)
                     // Skip the following instruction if the key corresponding
                     // to the hex value currently stored in register VX is pressed
                     case 0x9E:
-                        //if (SDL_PollEvent(&e) && e.type == SDL_KEYDOWN && e.key.keysym.sym == )
-                        todo(opcode);
+                        if (key_pressed && strtol(SDL_GetKeyName(k.keysym.sym), NULL, 16) == v[x])
+                            pc += 4;
+                        else
+                            pc += 2;
                         break;
 
                     // Skip the following instruction if the key corresponding
                     // to the hex value currently stored in register VX is not pressed
                     case 0xA1:
-                        todo(opcode);
+                        if (!key_pressed || strtol(SDL_GetKeyName(k.keysym.sym), NULL, 16) != v[x])
+                            pc += 4;
+                        else
+                            pc += 2;
                         break;
                     
                     default:
@@ -361,7 +391,12 @@ int main(int argc, char **argv)
                     
                     // Wait for a keypress and store result in VX
                     case 0x0A:
-                        todo(opcode);
+                        if (key_pressed)
+                        {
+                            int key = strtol(SDL_GetKeyName(k.keysym.sym), NULL, 16);
+                            v[x] = key;
+                            pc += 2;
+                        }
                         break;
 
                     // Set delay timer to value in VX
