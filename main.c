@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
+#include <unistd.h>
 #include <SDL2/SDL.h>
 
 #define SCALE 10
@@ -21,7 +23,10 @@ void todo(uint8_t opcode)
 
 int main(int argc, char **argv)
 {
-    // 4096 B memory
+    // Seed random generator with current time
+    srand(time(NULL));
+
+    // Array of 4096 bytes to represent memory
     uint8_t mem[4096];
     for (size_t i = 0; i < 4096; i++)
         mem[i] = 0;
@@ -40,20 +45,17 @@ int main(int argc, char **argv)
         fread(mem + 0x200, sizeof(uint8_t), fsize, rom);
     }
 
+    // Array of 16 16-bit values to represent the stack
     uint16_t stack[16];
-    
-    bool display[2048];
-    for (size_t i = 0; i < 2048; i++)
-        display[i] = false;
-
-    // Program counter and stack pointer
-    uint16_t pc = 0x200;
-    uint8_t sp = 0;
 
     // Data registers
     uint8_t v[16];
     for (size_t i = 0; i < 16; i++)
         v[i] = 0;
+
+    // Program counter and stack pointer
+    uint16_t pc = 0x200;
+    uint8_t sp = 0;
 
     // Address register
     uint16_t I = 0;
@@ -61,6 +63,12 @@ int main(int argc, char **argv)
     // Delay timer and sound timer
     uint8_t dt = 0;
     uint8_t st = 0;
+
+    // Array of 64 * 32 booleans to represent display
+    // false = pixel off, true = pixel on
+    bool display[2048];
+    for (size_t i = 0; i < 2048; i++)
+        display[i] = false;
 
     // Storing font data (one line per char, 0 -> F) into reserved memory space (0x000 -> 0x04F included)
     uint8_t *font_byte = mem;
@@ -88,12 +96,14 @@ int main(int argc, char **argv)
     // Initialize SDL
     SDL_Window *win;
     SDL_Renderer *ren;
+    bool quit = false;
 
     int width = WIDTH * SCALE;
     int height = HEIGHT * SCALE;
 
     SDL_Init(SDL_INIT_VIDEO);
     SDL_CreateWindowAndRenderer(width, height, 0, &win, &ren);
+    SDL_SetWindowTitle(win, "Chip-8");
     SDL_RenderSetScale(ren, SCALE, SCALE);
     
     // Clear screen
@@ -110,16 +120,38 @@ int main(int argc, char **argv)
     SDL_Event e;
     while (true)
     {
-        if (pc > 4095)
+        while (SDL_PollEvent(&e))
         {
-            printf("Reached end of memory\n");
-            break;
+            switch (e.type)
+            {
+                case SDL_QUIT:
+                    quit = true;
+                    break;
+                
+                case SDL_KEYDOWN:
+                    printf("Pressed: %s\n", SDL_GetKeyName(e.key.keysym.sym));
+                    break;
+
+                case SDL_KEYUP:
+                    printf("Released: %s\n", SDL_GetKeyName(e.key.keysym.sym));
+
+                default:
+                    break;
+            }
         }
-        if (SDL_PollEvent(&e) && e.type == SDL_QUIT)
+        if (quit)
             break;
         
+        uint16_t prev_opcode = 0;
         uint16_t opcode = (mem[pc] << 8) | mem[pc + 1];
-        printf("OPCODE = %04X\n", opcode);
+        uint8_t x = (opcode & 0x0F00) >> 8;
+        uint8_t y = (opcode & 0x00F0) >> 4;
+        uint16_t nnn = opcode & 0x0FFF;
+        uint8_t nn = opcode & 0x00FF;
+        uint8_t n = opcode & 0x000F;
+
+        if (opcode != prev_opcode)
+            printf("OPCODE = %04X\n", opcode);
 
         // Test the first hexadecimal digit of the opcode
         switch (opcode & 0xF000)
@@ -136,7 +168,7 @@ int main(int argc, char **argv)
                     
                     // Return from subroutine
                     case 0x00EE:
-                        pc = stack[sp--];
+                        pc = stack[--sp];
                         break;
                     
                     default:
@@ -151,13 +183,13 @@ int main(int argc, char **argv)
             
             // Execute subroutine starting at address
             case 0x2000:
-                stack[++sp] = pc;
+                stack[sp++] = pc;
                 pc = opcode & 0x0FFF;
                 break;
             
             // Skip following instruction if VX == NN
             case 0x3000:
-                if (v[opcode & 0x0F00] == (opcode & 0x00FF))
+                if (v[x] == nn)
                     pc += 4;
                 else
                     pc += 2;
@@ -165,7 +197,7 @@ int main(int argc, char **argv)
 
             // Skip following instruction if VX != NN
             case 0x4000:
-                if (v[opcode & 0x0F00] != (opcode & 0x00FF))
+                if (v[x] != nn)
                     pc += 4;
                 else
                     pc += 2;
@@ -173,7 +205,7 @@ int main(int argc, char **argv)
             
             // Skip following instruction if VX == VY
             case 0x5000:
-                if (v[opcode & 0x0F00] == v[opcode & 0x00F0])
+                if (v[x] == v[y])
                     pc += 4;
                 else
                     pc += 2;
@@ -181,13 +213,13 @@ int main(int argc, char **argv)
 
             // Store NN in VX
             case 0x6000:
-                v[opcode & 0x0F00] = opcode & 0x00FF;
+                v[x] = nn;
                 pc += 2;
                 break;
             
             // Add NN to VX
             case 0x7000:
-                v[opcode & 0x0F00] += opcode & 0x00FF;
+                v[x] += nn;
                 pc += 2;
                 break;
 
@@ -196,25 +228,25 @@ int main(int argc, char **argv)
                 {
                     // Store VY in VX
                     case 0x0:
-                        v[opcode & 0x0F00] = v[opcode & 0x00F0];
+                        v[x] = v[y];
                         pc += 2;
                         break;
                     
                     // Set VX to VX | VY
                     case 0x1:
-                        v[opcode & 0x0F00] |= v[opcode & 0x00F0];
+                        v[x] |= v[y];
                         pc += 2;
                         break;
 
                     // Set VX to VX && VY
                     case 0x2:
-                        v[opcode & 0x0F00] &= v[opcode & 0x00F0];
+                        v[x] &= v[y];
                         pc += 2;
                         break;
 
                     // Set VX to VX ^ VY
                     case 0x3:
-                        v[opcode & 0x0F00] ^= v[opcode & 0x00F0];
+                        v[x] ^= v[y];
                         pc += 2;
                         break;
 
@@ -224,7 +256,7 @@ int main(int argc, char **argv)
                             v[0xF] = 1;
                         else
                             v[0xF] = 0;
-                        v[opcode & 0x0F00] += v[opcode & 0x00F0];
+                        v[x] += v[y];
                         pc += 2;
                         break;
 
@@ -236,8 +268,8 @@ int main(int argc, char **argv)
                     
                     // Set VX to (VY >> 1), set VF to LSB prior to the shift
                     case 0x6:
-                        v[opcode & 0x0F00] = v[opcode & 0x00F0] >> 1;
-                        v[0xF] = v[opcode & 0x00F0] & 0xF;
+                        v[x] = v[y] >> 1;
+                        v[0xF] = v[y] & 0xF;
                         pc += 2;
                         break;
                     
@@ -247,10 +279,10 @@ int main(int argc, char **argv)
                         todo(opcode);
                         break;
                     
-                    // Set VX to (VX << 1), set VF to MSB prior to the shift
+                    // Set VX to (VY << 1), set VF to MSB prior to the shift
                     case 0xE:
-                        v[opcode & 0x0F00] = v[opcode & 0x00F0] << 1;
-                        v[0xF] = v[opcode & 0x0F00] & 0xF;
+                        v[x] = v[y] << 1;
+                        v[0xF] = v[x] & 0xF;
                         pc += 2;
                         break;
 
@@ -261,7 +293,7 @@ int main(int argc, char **argv)
             
             // Skip next instruction if VX != VY
             case 0x9000:
-                if (v[opcode & 0x0F00] != v[opcode & 0x00F0])
+                if (v[x] != v[y])
                     pc += 4;
                 else
                     pc += 2;
@@ -269,31 +301,29 @@ int main(int argc, char **argv)
             
             // Store NNN in I
             case 0xA000:
-                I = opcode & 0x0FFF;
+                I = nnn;
                 pc += 2;
                 break;
             
             // Jump to NNN + V0
             case 0xB000:
-                pc = v[0] + (opcode & 0x0FFF);
+                pc = v[0] + nnn;
                 break;
 
-            // Set VX to random number
+            // Set VX to (random number & NN)
             case 0xC000:
-                v[opcode & 0x0F00] = 23; // random !
+                v[x] = rand() & nn;
                 break;
             
             case 0xD000:
                 // Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I. 
                 // Set VF to 01 if any set pixels are changed to unset, and 00 otherwise
-                // X = v[opcode & 0x0F00]
-                // Y = v[opcode & 0x00F0]
-                // N = v[opcode & 0x000F]
-                for (uint8_t y = 0; y < v[opcode & 0x000F]; y++)
+                for (uint8_t y_sprite = 0; y < n; y++)
                 {
-                    for (uint8_t x = 0; x < 8; x++)
+                    for (uint8_t x_sprite = 0; x < 8; x++)
                     {
-                        display[v[opcode & 0x00F0] * WIDTH + v[opcode & 0x0F00]] = display[v[opcode & 0x00F0] * WIDTH + v[opcode & 0x0F00]] ^ mem[I + y];
+                        display[(v[y] + y_sprite) * WIDTH + v[x] + x_sprite] = 
+                        display[v[y] * WIDTH + v[x]] ^ mem[I + y];
                     }
                 }
                 pc += 2;
@@ -302,11 +332,15 @@ int main(int argc, char **argv)
             case 0xE000:
                 switch (opcode & 0x00FF)
                 {
+                    // Skip the following instruction if the key corresponding
+                    // to the hex value currently stored in register VX is pressed
                     case 0x9E:
                         //if (SDL_PollEvent(&e) && e.type == SDL_KEYDOWN && e.key.keysym.sym == )
                         todo(opcode);
                         break;
 
+                    // Skip the following instruction if the key corresponding
+                    // to the hex value currently stored in register VX is not pressed
                     case 0xA1:
                         todo(opcode);
                         break;
@@ -319,56 +353,63 @@ int main(int argc, char **argv)
             case 0xF000:
                 switch (opcode & 0x00FF)
                 {
+                    // Store delay timer in VX
                     case 0x07:
-                        v[opcode & 0x0F00] = dt;
+                        v[x] = dt;
                         pc += 2;
                         break;
                     
+                    // Wait for a keypress and store result in VX
                     case 0x0A:
-                        // Wait for a keypress and store result in VX
                         todo(opcode);
                         break;
 
+                    // Set delay timer to value in VX
                     case 0x15:
-                        dt = v[opcode & 0x0F00];
+                        dt = v[x];
                         pc += 2;
                         break;
-                    
+
+                    // Set sound timer to value in VX
                     case 0x18:
-                        st = v[opcode & 0x0F00];
+                        st = v[x];
                         pc += 2;
                         break;
                     
+                    // Add value in VX to I
                     case 0x1E:
-                        I += v[opcode & 0x0F00];
+                        I += v[x];
                         pc += 2;
                         break;
-
+                        
+                    // Set I to the address of the sprite data corresponding
+                    // to the hex digit stored in VX
                     case 0x29:
-                        I = v[opcode & 0x0F00] * 5;
+                        I = v[x] * 5;
                         pc += 2;
                         break;
 
+                    // Store BCD of value in VX at I, I+1 and I+2
                     case 0x33:
-                        mem[I] = v[(opcode & 0x0F00) >> 8] / 100;
-                        mem[I + 1] = (v[(opcode & 0x0F00) >> 8] / 10) % 10;
-                        mem[I + 2] = (v[(opcode & 0x0F00) >> 8] % 100) % 10;
+                        mem[I] = v[x] / 100;
+                        mem[I + 1] = (v[x] / 10) % 10;
+                        mem[I + 2] = (v[x] % 100) % 10;
                         pc += 2;
                         break;
 
+                    // Store values in V0 to VX (included) in memory at I to I + X
+                    // I is set to I + X + 1
                     case 0x55:
-                        for (size_t i = 0; i <= (opcode & 0x0F00); i++)
-                        {
+                        for (uint8_t i = 0; i <= x; i++)
                             mem[I++] = v[i];
-                        }
                         pc += 2;
                         break;
 
+                    // Store values in memory at I to I + X in V0 to VX (included)
+                    // I is set to I + X + 1
                     case 0x65:
-                        for (size_t i = 0; i <= (opcode & 0x0F00); i++)
-                        {
+                        for (uint8_t i = 0; i <= x; i++)
                             v[i] = mem[I++];
-                        }
                         pc += 2;
                         break;
 
@@ -395,6 +436,9 @@ int main(int argc, char **argv)
             }
         }
         SDL_RenderPresent(ren);
+
+        // Sleep for 2000 microseconds (1 / 500 seconds)
+        usleep(2000);
     }
 
     SDL_DestroyRenderer(ren);
